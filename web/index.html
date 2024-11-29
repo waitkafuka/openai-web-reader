@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>聊天界面</title>
+    <script>
+        let lastMessage = ''; // 存储最后一次发送的消息
+        let currentAssistantMessage = ''; // 用于累积当前助手的回复
+
+        async function sendMessage(isRegenerate = false) {
+            currentAssistantMessage = '';
+            const messageInput = document.getElementById('messageInput');
+            const message = isRegenerate ? lastMessage : messageInput.value;
+            
+            if (!message.trim()) return;
+            if (!isRegenerate) {
+                lastMessage = message;
+                // 添加用户消息
+                const userDiv = document.createElement('div');
+                userDiv.className = 'message user-message';
+                userDiv.textContent = message;
+                document.getElementById('chatWindow').appendChild(userDiv);
+                messageInput.value = '';
+            }
+
+            // 移除上一个助手消息（如果是重新生成的情况）
+            if (isRegenerate) {
+                const lastAssistantMessage = document.querySelector('.assistant-message:last-child');
+                if (lastAssistantMessage) {
+                    lastAssistantMessage.remove();
+                }
+            }
+
+            const response = await fetch('http://localhost:2918/api/chat', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message })
+            });
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    console.log('Stream done');
+                    break;
+                };
+                
+                const text = decoder.decode(value);
+                console.log('Received text:', text);
+                const lines = text.split('\n').filter(line => line.trim());
+                
+                for (const line of lines) {
+                    try {
+                        const data = JSON.parse(line);
+                        console.log('Parsed data:', data);
+                        
+                        switch (data.type) {
+                            case 'progress':
+                                console.log('Progress update:', data.content);
+                                updateProgress(data.content);
+                                break;
+                            case 'message':
+                                appendMessage(data.content);
+                                break;
+                            case 'error':
+                                showError(data.content);
+                                break;
+                            case 'done':
+                                complete();
+                                break;
+                        }
+                    } catch (e) {
+                        console.error('解析响应数据失败:', e, 'Raw line:', line);
+                    }
+                }
+            }
+        }
+
+        // 将事件监听器移到 DOMContentLoaded 事件中
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('messageInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessage(false);
+                }
+            });
+        });
+
+        // 添加辅助函数
+        function updateProgress(content) {
+            // 更新进度提示
+            const progressElement = document.getElementById('progress');
+            if (progressElement) {
+                progressElement.textContent = content || '正在处理您的请求...';
+            }
+        }
+
+        function appendMessage(content) {
+            // 移除现有的最后一条助手消息（如果存在）
+            const existingMessage = document.querySelector('.assistant-message:last-child');
+            if (existingMessage) {
+                existingMessage.remove();
+            }
+            
+            // 累积消息内容
+            currentAssistantMessage += content;
+            
+            // 创建新的消息元素
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant-message';
+            messageDiv.textContent = currentAssistantMessage;
+            document.getElementById('chatWindow').appendChild(messageDiv);
+            
+            // 滚动到底部
+            const chatWindow = document.getElementById('chatWindow');
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        function showError(content) {
+            // 显示错误信息
+            console.error('Error:', content);
+            // 可以添加错误提示UI
+        }
+
+        function complete() {
+            const progressElement = document.getElementById('progress');
+            if (progressElement) {
+                progressElement.textContent = ''; // 清除进度信息
+            }
+            // 重置当前消息累积变量
+            currentAssistantMessage = '';
+            console.log('Stream completed');
+        }
+    </script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f2f2f2;
+            margin: 0;
+            padding: 0;
+        }
+        #chatWindow {
+            background-color: #fff;
+            margin: 20px auto;
+            padding: 10px;
+            height: 300px;
+            width: 80%;
+            border: 1px solid #ccc;
+            overflow-y: scroll;
+            border-radius: 5px;
+        }
+        #messageInput {
+            width: 70%;
+            padding: 10px;
+            margin-top: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            margin-top: 10px;
+            background-color: #4CAF50;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .container {
+            margin: 0 auto;
+            text-align: center;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 8px 12px;
+            border-radius: 8px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+
+        .user-message {
+            background-color: #e3f2fd;
+            margin-left: auto;
+            text-align: right;
+        }
+
+        .assistant-message {
+            background-color: #f5f5f5;
+            margin-right: auto;
+            text-align: left;
+        }
+
+        #chatWindow {
+            display: flex;
+            flex-direction: column;
+            padding: 15px;
+        }
+
+        .input-container {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            background-color: #fff;
+            padding: 15px;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+            border-radius: 5px;
+        }
+
+        .button-container {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        
+        .regenerate-button {
+            background-color: #2196F3;
+        }
+        
+        .regenerate-button:hover {
+            background-color: #1976D2;
+        }
+        
+        #progress {
+            margin: 10px 0;
+            color: #666;
+            font-style: italic;
+            min-height: 20px;
+            text-align: center;
+            padding: 5px;
+            display: block;
+            width: 80%;
+            margin: 10px auto;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="chatWindow"></div>
+        <div id="progress"></div>
+        <div class="input-container">
+            <input type="text" id="messageInput" value="请帮我查看 http://dzb.hxnews.com/news/yl/202411/28/2183049.shtml 网页的内容并总结一下" placeholder="请输入您的消息" />
+            <div class="button-container">
+                <button onclick="sendMessage(false)">发送</button>
+                <button onclick="sendMessage(true)" class="regenerate-button">重新生成</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
