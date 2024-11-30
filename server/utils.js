@@ -61,6 +61,9 @@ async function callOpenAI(messages, toolSchemas = null) {
     requestBody.tool_choice = "auto";
   }
 
+  console.log('process.env.OPENAI_API_URL', process.env.OPENAI_API_URL);
+  
+
   try {
     const response = await axios({
       method: 'post',
@@ -90,6 +93,7 @@ function processUserQuery(userInput) {
   });
   
   let isFunctionCallInProgress = false;  // 添加标识变量
+  let partialData = ''; // Variable to store incomplete data chunks
 
   (async () => {
     try {
@@ -108,7 +112,11 @@ function processUserQuery(userInput) {
 
       // 处理流式响应
       responseStream.on('data', (chunk) => {
-        const lines = chunk.toString().split('\n');
+        partialData += chunk.toString(); // Append the new chunk to partialData
+
+        let lines = partialData.split('\n'); // Split the accumulated data by new lines
+        partialData = lines.pop(); // Remove the last line (which might be incomplete) and keep it in partialData
+
         for (const line of lines) {
           if (line.trim().startsWith('data: ')) {
             const data = line.replace('data: ', '').trim();
@@ -120,6 +128,11 @@ function processUserQuery(userInput) {
               }
               return;
             } else {
+              if(data === '{"error":"Unknown Error"}') {
+                stream.push(formatStreamResponse('progress', '未知错误，请重试'));
+                stream.push(null);
+                return;
+              }
               try {
                 const parsed = JSON.parse(data);
                 const delta = parsed.choices[0].delta;
@@ -223,7 +236,25 @@ function processUserQuery(userInput) {
       });
 
       responseStream.on('end', () => {
-        // 只有在不是function call进行中时才发送完成消息
+        // Process any remaining data in partialData
+        if (partialData.trim() !== '') {
+          const line = partialData;
+          if (line.trim().startsWith('data: ')) {
+            const data = line.replace('data: ', '').trim();
+            if (data !== '[DONE]') {
+              try {
+                const parsed = JSON.parse(data);
+                const delta = parsed.choices[0].delta;
+                // ... (Your existing processing logic)
+              } catch (err) {
+                console.error("解析响应错误:", err);
+                // Optionally handle parsing errors here
+              }
+            }
+          }
+        }
+
+        // Only send 'done' message if not in function call
         if (!isFunctionCallInProgress) {
           stream.push(formatStreamResponse('done', '处理完成'));
           stream.push(null);
